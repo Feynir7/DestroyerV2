@@ -22,5 +22,5 @@ It is intended for:
 
 ---Usage---
 Run the tool with:
-
-python3 Destroyer.V2.py
+cd Destroyer
+python3 main.py

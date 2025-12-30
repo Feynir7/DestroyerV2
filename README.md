@@ -22,5 +22,6 @@ It is intended for:
 
 ---Usage---
 Run the tool with:
+
 cd Destroyer
-python3 main.py
+sudo python3 main.py

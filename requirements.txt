@@ -2,3 +2,4 @@ httpx
 scapy
 rich
 pyfiglet
+cython

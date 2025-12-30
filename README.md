@@ -24,4 +24,5 @@ It is intended for:
 Run the tool with:
 
 cd Destroyer
+
 sudo python3 main.py
